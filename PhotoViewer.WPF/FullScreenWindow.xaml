@@ -1,0 +1,109 @@
+﻿<!--
+    ============================================================
+    PhotoViewer.WPF — Полноэкранное окно просмотра
+    Открывается по двойному клику на фото в главном окне
+    
+    Ключевые особенности:
+    - WindowState="Maximized" + WindowStyle="None" = полный экран без рамки
+    - Background="Black" — чёрный фон для лучшего восприятия фото
+    - KeyDown — обработка клавиш Escape, ←, → для навигации
+    ============================================================
+-->
+<Window x:Class="PhotoViewer.WPF.FullScreenWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Просмотр"
+        WindowState="Maximized"
+        WindowStyle="None"
+        Background="Black"
+        KeyDown="Window_KeyDown">
+    <!--
+        WindowState="Maximized" — окно открывается на весь экран
+        WindowStyle="None"      — убирает рамку окна, заголовок и кнопки
+        KeyDown="Window_KeyDown" — обработчик клавиш: Esc закрывает, ← → листают
+    -->
+
+    <Grid>
+        <!-- ── Основное изображение ─────────────────────────────────── -->
+        <!--
+            Stretch="Uniform" — масштабирует изображение сохраняя пропорции,
+            вписывая его в доступное пространство без обрезки
+        -->
+        <Image x:Name="FullImage" Stretch="Uniform"/>
+
+        <!-- ── Кнопка закрытия (✕) ──────────────────────────────────── -->
+        <!--
+            Расположена в правом верхнем углу
+            Opacity="0.7" через Background="#55000000" — полупрозрачный фон
+            (первые два символа 55 — это прозрачность в HEX: 55/FF ≈ 33%)
+        -->
+        <Button Content="✕"
+                Click="CloseButton_Click"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="0,20,20,0"
+                Width="40" Height="40"
+                FontSize="18"
+                Foreground="White"
+                Background="#55000000"
+                BorderThickness="0"
+                Cursor="Hand"/>
+
+        <!-- ── Кнопка "Предыдущее фото" (❮) ─────────────────────────── -->
+        <!--
+            HorizontalAlignment="Left" + Margin="20,0,0,0" — прижата к левому краю
+            VerticalAlignment="Center" — по центру по вертикали
+            Клик: PrevButton_Click — уменьшает _currentIndex и загружает фото
+        -->
+        <Button Content="❮"
+                Click="PrevButton_Click"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                Margin="20,0,0,0"
+                Width="50" Height="50"
+                FontSize="22"
+                Foreground="White"
+                Background="#55000000"
+                BorderThickness="0"
+                Cursor="Hand"/>
+
+        <!-- ── Кнопка "Следующее фото" (❯) ──────────────────────────── -->
+        <!--
+            HorizontalAlignment="Right" + Margin="0,0,20,0" — прижата к правому краю
+        -->
+        <Button Content="❯"
+                Click="NextButton_Click"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Margin="0,0,20,0"
+                Width="50" Height="50"
+                FontSize="22"
+                Foreground="White"
+                Background="#55000000"
+                BorderThickness="0"
+                Cursor="Hand"/>
+
+        <!-- ── Информационная панель внизу ───────────────────────────── -->
+        <!--
+            VerticalAlignment="Bottom" — прижата к нижнему краю окна
+            Background="#88000000" — полупрозрачный чёрный фон (88/FF ≈ 53%)
+            Накладывается поверх изображения (оба элемента в одной Grid-ячейке)
+        -->
+        <Border VerticalAlignment="Bottom"
+                Background="#88000000"
+                Padding="20,10">
+            <StackPanel>
+                <!-- Имя файла фотографии (OriginalFileName или FileName) -->
+                <TextBlock x:Name="FileNameText"
+                           Foreground="White"
+                           FontSize="14"
+                           FontWeight="SemiBold"/>
+
+                <!-- Описание фотографии ("Без описания" если не задано) -->
+                <TextBlock x:Name="DescriptionText"
+                           Foreground="#CCC"
+                           FontSize="12"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

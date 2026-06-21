@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="PhotoViewer.API/PhotoViewer.API.csproj" />
+  <Project Path="PhotoViewer.Shared/PhotoViewer.Shared.csproj" />
+  <Project Path="PhotoViewer.WPF/PhotoViewer.WPF.csproj" />
+</Solution>

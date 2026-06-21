@@ -1,0 +1,1126 @@
+﻿<!--
+    ============================================================
+    PhotoViewer.WPF — Главное окно приложения
+    
+    Структура разметки:
+    ┌─────────────────────────────────────────┐
+    │  Шапка (Header): логотип + сервер + кнопки  │  Row 0
+    ├─────────────────────────────────────────┤
+    │  Строка статистики сервера              │  Row 1
+    ├─────────────────────────────────────────┤
+    │  Прогресс-бар загрузки (Collapsed)      │  Row 2
+    ├──────────────┬──────────────────────────┤
+    │  Боковая     │  Область просмотра       │  Row 3
+    │  панель      │  (Image + инфо панель)   │
+    │  (Галерея/   │                          │
+    │   Альбомы)   │                          │
+    ├──────────────┴──────────────────────────┤
+    │  Статус-бар                             │  Row 4
+    └─────────────────────────────────────────┘
+    
+    Ключевые техники WPF:
+    - DynamicResource — для переключения темы без перезапуска
+    - DataTemplate — шаблоны элементов галереи (сетка и список)
+    - IValueConverter — UrlToImageConverter для миниатюр
+    - BooleanToVisibilityConverter — показ звёздочки избранных
+    - TransformGroup (Scale + Rotate) — зум и поворот изображения
+    - AllowDrop/Drop/DragOver — Drag & Drop загрузка файлов
+    ============================================================
+-->
+<Window x:Class="PhotoViewer.WPF.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:converters="clr-namespace:PhotoViewer.WPF.Converters"
+        Title="PhotoViewer"
+        Height="680" Width="1200"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource BackgroundBrush}"
+        AllowDrop="True"
+        Drop="Window_Drop"
+        DragOver="Window_DragOver"
+        KeyDown="Window_KeyDown"
+        Loaded="Window_Loaded">
+    <!--
+        Background="{DynamicResource BackgroundBrush}" — цвет фона из ресурсов
+        DynamicResource (в отличие от StaticResource) обновляется при изменении ресурса —
+        именно это позволяет переключать темы без перезапуска
+        
+        AllowDrop="True" — разрешает принимать перетаскиваемые файлы
+        Drop/DragOver — обработчики Drag & Drop событий в MainWindow.xaml.cs
+        Loaded="Window_Loaded" — вызывается после полной загрузки UI (автоподключение)
+    -->
+
+    <Window.Resources>
+        <!--
+            ═══════════════════════════════════════════════════════
+            РЕСУРСЫ ТЕМЫ — цветовые кисти для DynamicResource
+            ═══════════════════════════════════════════════════════
+            Определяются здесь как начальные значения тёмной темы
+            При переключении темы ThemeButton_Click заменяет их значения
+            в словаре Resources — WPF автоматически обновляет весь UI
+        -->
+
+        <!-- Основной фон окна -->
+        <SolidColorBrush x:Key="BackgroundBrush" Color="#1A1A2E"/>
+        <!-- Фон шапки, статус-бара и боковой панели -->
+        <SolidColorBrush x:Key="HeaderBrush"     Color="#16213E"/>
+        <!-- Фон карточек, полей ввода и области просмотра -->
+        <SolidColorBrush x:Key="PanelBrush"      Color="#0F3460"/>
+        <!-- Фон строки статистики и прогресс-бара -->
+        <SolidColorBrush x:Key="StatsBrush"      Color="#12192B"/>
+        <!-- Основной цвет текста -->
+        <SolidColorBrush x:Key="TextBrush"       Color="White"/>
+        <!-- Второстепенный цвет текста (даты, подписи) -->
+        <SolidColorBrush x:Key="SubTextBrush"    Color="#A0A0B0"/>
+        <!-- Фон полей ввода TextBox -->
+        <SolidColorBrush x:Key="InputBackgroundBrush" Color="#0F3460"/>
+        <!-- Цвет текста в полях ввода -->
+        <SolidColorBrush x:Key="InputForegroundBrush" Color="White"/>
+        <!-- Цвет надписи "PhotoViewer" в шапке -->
+        <SolidColorBrush x:Key="LogoTextBrush"   Color="White"/>
+        <!-- Цвет обводки полей ввода -->
+        <SolidColorBrush x:Key="InputBorderBrush" Color="#E94560"/>
+        <!-- Цвет основных кнопок (Загрузить, Подключиться) -->
+        <SolidColorBrush x:Key="ButtonPrimaryBrush"   Color="#E94560"/>
+        <!-- Цвет вторичных кнопок (Удалить, Обновить) -->
+        <SolidColorBrush x:Key="ButtonSecondaryBrush" Color="#0F3460"/>
+        <!-- Цвет зелёных кнопок (Скачать, ZIP) -->
+        <SolidColorBrush x:Key="ButtonGreenBrush"     Color="#1B6B3A"/>
+        <!-- Цвет оранжевой кнопки (Слайд-шоу) -->
+        <SolidColorBrush x:Key="ButtonOrangeBrush"    Color="#B85C00"/>
+        <!-- Цвет фона при наведении мыши (hover) -->
+        <SolidColorBrush x:Key="HoverBrush"      Color="#0F3460"/>
+        <!-- Цвет ползунка скроллбара -->
+        <SolidColorBrush x:Key="ScrollThumbBrush" Color="#E94560"/>
+        <!-- Цвет дорожки скроллбара -->
+        <SolidColorBrush x:Key="ScrollTrackBrush" Color="#16213E"/>
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            КОНВЕРТЕРЫ для привязок данных (Binding Converters)
+            ═══════════════════════════════════════════════════════
+        -->
+
+        <!--
+            UrlToImageConverter — конвертирует URL строку в BitmapImage
+            Используется в DataTemplate галереи:
+            Source="{Binding Url, Converter={StaticResource UrlToImageConverter}}"
+        -->
+        <converters:UrlToImageConverter x:Key="UrlToImageConverter"/>
+
+        <!--
+            BooleanToVisibilityConverter — стандартный WPF конвертер
+            true → Visible, false → Collapsed
+            Используется для показа звёздочки ★ у избранных фото
+        -->
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            СТИЛИ КНОПОК — переиспользуемые шаблоны оформления
+            ═══════════════════════════════════════════════════════
+            BasedOn="{StaticResource ModernButton}" — наследование стиля
+            Дочерние стили переопределяют только нужные свойства
+        -->
+
+        <!-- Основная красная кнопка (Загрузить, Подключиться) -->
+        <Style x:Key="ModernButton" TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource ButtonPrimaryBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <!--
+                        ControlTemplate полностью заменяет стандартный шаблон кнопки
+                        Без него кнопка выглядела бы как стандартная Windows-кнопка
+                        Border с CornerRadius="6" даёт скруглённые углы
+                    -->
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <!-- Затемнение при наведении мыши -->
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#C73652"/>
+                            </Trigger>
+                            <!-- Ещё темнее при нажатии -->
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#A02A42"/>
+                            </Trigger>
+                            <!-- Серый цвет когда кнопка неактивна -->
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="#555"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Синяя кнопка (Удалить, Обновить, Описание) -->
+        <Style x:Key="SecondaryButton" TargetType="Button"
+               BasedOn="{StaticResource ModernButton}">
+            <Setter Property="Background" Value="{DynamicResource ButtonSecondaryBrush}"/>
+        </Style>
+
+        <!-- Зелёная кнопка (Скачать, ZIP) -->
+        <Style x:Key="GreenButton" TargetType="Button"
+               BasedOn="{StaticResource ModernButton}">
+            <Setter Property="Background" Value="{DynamicResource ButtonGreenBrush}"/>
+        </Style>
+
+        <!-- Оранжевая кнопка (Слайд-шоу) -->
+        <Style x:Key="OrangeButton" TargetType="Button"
+               BasedOn="{StaticResource ModernButton}">
+            <Setter Property="Background" Value="{DynamicResource ButtonOrangeBrush}"/>
+        </Style>
+
+        <!-- Жёлтая кнопка (Избранное) -->
+        <Style x:Key="YellowButton" TargetType="Button"
+               BasedOn="{StaticResource ModernButton}">
+            <Setter Property="Background" Value="#8B7000"/>
+        </Style>
+
+        <!-- Кнопки навигации ❮ ❯ (полупрозрачные, поверх изображения) -->
+        <Style x:Key="NavButton" TargetType="Button"
+               BasedOn="{StaticResource ModernButton}">
+            <Setter Property="Background" Value="#55000000"/>
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Padding" Value="0"/>
+        </Style>
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            СТИЛЬ ТЕКСТОВОГО ПОЛЯ (TextBox)
+            ═══════════════════════════════════════════════════════
+            ControlTemplate нужен чтобы убрать стандартную рамку Windows
+            и заменить на скруглённую через Border + CornerRadius
+        -->
+        <Style x:Key="ModernTextBox" TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource InputForegroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource InputBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource InputForegroundBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6">
+                            <!--
+                                PART_ContentHost — обязательное имя для TextBox
+                                WPF ищет элемент с этим именем для размещения курсора и текста
+                            -->
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          Margin="{TemplateBinding Padding}"
+                                          VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            СТИЛЬ ВЫПАДАЮЩЕГО СПИСКА (ComboBox)
+            ═══════════════════════════════════════════════════════
+            Кастомный шаблон нужен для:
+            - Скруглённых углов
+            - Стилизованного Popup (выпадающего списка)
+            - Кастомной стрелки ▾
+        -->
+        <Style x:Key="ModernComboBox" TargetType="ComboBox">
+            <Setter Property="Background" Value="{DynamicResource InputBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource InputBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <!-- Отображаемая часть (закрытый ComboBox) -->
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="6">
+                                <Grid Margin="{TemplateBinding Padding}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="20"/>
+                                    </Grid.ColumnDefinitions>
+                                    <!-- Текст выбранного элемента -->
+                                    <ContentPresenter Grid.Column="0"
+                                                      Content="{TemplateBinding SelectionBoxItem}"
+                                                      VerticalAlignment="Center"/>
+                                    <!-- Кастомная стрелка вниз ▾ -->
+                                    <TextBlock Grid.Column="1" Text="▾"
+                                               Foreground="{DynamicResource InputBorderBrush}"
+                                               VerticalAlignment="Center"
+                                               HorizontalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+
+                            <!--
+                                Popup — выпадающий список при раскрытии ComboBox
+                                IsOpen привязан к IsDropDownOpen свойству ComboBox
+                                AllowsTransparency="True" нужно для скруглённых углов Popup
+                            -->
+                            <Popup x:Name="PART_Popup"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                                   Placement="Bottom"
+                                   AllowsTransparency="True">
+                                <Border Background="{DynamicResource InputBackgroundBrush}"
+                                        BorderBrush="{DynamicResource InputBorderBrush}"
+                                        BorderThickness="1" CornerRadius="6" Margin="0,2,0,0">
+                                    <ScrollViewer MaxHeight="200">
+                                        <!-- ItemsPresenter отображает элементы списка -->
+                                        <ItemsPresenter/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+
+                            <!--
+                                Прозрачная кнопка поверх всего — открывает/закрывает Popup
+                                Opacity="0" — невидима, но перехватывает клики
+                            -->
+                            <ToggleButton Opacity="0"
+                                          IsChecked="{Binding IsDropDownOpen,
+                                          RelativeSource={RelativeSource TemplatedParent},
+                                          Mode=TwoWay}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Resources>
+                <!-- Стиль элементов выпадающего списка ComboBoxItem -->
+                <Style TargetType="ComboBoxItem">
+                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="Padding" Value="10,7"/>
+                    <Setter Property="Cursor" Value="Hand"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ComboBoxItem">
+                                <Border Background="{TemplateBinding Background}"
+                                        Padding="{TemplateBinding Padding}"
+                                        CornerRadius="4" Margin="2">
+                                    <ContentPresenter/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource HoverBrush}"/>
+                                        <Setter Property="Foreground" Value="White"/>
+                                    </Trigger>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="#E94560"/>
+                                        <Setter Property="Foreground" Value="White"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </Style.Resources>
+        </Style>
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            СТИЛЬ ВКЛАДОК (TabControl / TabItem)
+            ═══════════════════════════════════════════════════════
+        -->
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+        </Style>
+
+        <!-- Стиль отдельной вкладки: активная = красная, неактивная = прозрачная -->
+        <Style TargetType="TabItem">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource SubTextBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}"
+                                CornerRadius="6,6,0,0">
+                            <ContentPresenter ContentSource="Header"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="#E94560"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="TabBorder" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            СТИЛЬ ЭЛЕМЕНТОВ СПИСКА (ListBoxItem)
+            ═══════════════════════════════════════════════════════
+            Используется для обоих ListBox: фотографий и альбомов
+            Скруглённые углы + подсветка при наведении/выборе
+        -->
+        <Style TargetType="ListBoxItem">
+            <Setter Property="Foreground" Value="{DynamicResource SubTextBrush}"/>
+            <Setter Property="Padding" Value="4"/>
+            <Setter Property="Margin" Value="2"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <!-- Подсветка при наведении -->
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                            <!-- Красный фон выбранного элемента -->
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="#E94560"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            СТИЛЬ ПОЛОСЫ ПРОКРУТКИ (ScrollBar)
+            ═══════════════════════════════════════════════════════
+            Кастомный ControlTemplate убирает стандартные кнопки ▲▼
+            и заменяет полосу на тонкую (6px) с красным ползунком
+        -->
+        <Style TargetType="ScrollBar">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <!-- Дорожка скроллбара -->
+                        <Border Background="{DynamicResource ScrollTrackBrush}"
+                                CornerRadius="3" Width="6">
+                            <!--
+                                Track — стандартный элемент скроллбара
+                                PART_Track — обязательное имя, WPF ищет его для работы скролла
+                                IsDirectionReversed="True" — прокрутка сверху вниз
+                            -->
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.Thumb>
+                                    <!-- Ползунок скроллбара -->
+                                    <Thumb>
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border Background="{DynamicResource ScrollThumbBrush}"
+                                                        CornerRadius="3"/>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!--
+            ═══════════════════════════════════════════════════════
+            DATA TEMPLATES — шаблоны отображения фотографий
+            ═══════════════════════════════════════════════════════
+            DataTemplate определяет как выглядит каждый элемент в ListBox
+            Привязки {Binding ...} используют поля PhotoDto
+            
+            Два шаблона: сетка (GridItemTemplate) и список (ListItemTemplate)
+            Переключаются кнопкой ▦/☰ через ViewToggleButton_Click
+        -->
+
+        <!-- Шаблон вида "Сетка" — миниатюра + имя файла -->
+        <DataTemplate x:Key="GridItemTemplate">
+            <Grid Width="220">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="140"/>
+                    <!-- Высота миниатюры -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- Высота подписи -->
+                </Grid.RowDefinitions>
+
+                <!--
+                    ClipToBounds="True" — обрезает изображение по границе Border
+                    Нужно чтобы Stretch="UniformToFill" не выходил за скруглённые углы
+                -->
+                <Border Grid.Row="0" CornerRadius="6"
+                        Background="{DynamicResource PanelBrush}"
+                        ClipToBounds="True">
+                    <!--
+                        Source="{Binding Url, Converter={StaticResource UrlToImageConverter}}"
+                        Binding Url — берёт URL из PhotoDto.Url
+                        Converter — конвертирует URL в BitmapImage через UrlToImageConverter
+                        Stretch="UniformToFill" — заполняет всё пространство, сохраняя пропорции
+                    -->
+                    <Image Source="{Binding Url, Converter={StaticResource UrlToImageConverter}}"
+                           Stretch="UniformToFill"/>
+                </Border>
+
+                <Grid Grid.Row="1">
+                    <!-- Имя файла под миниатюрой -->
+                    <TextBlock Text="{Binding OriginalFileName}"
+                               Foreground="#A0A0B0" FontSize="10"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="2,4,16,0"/>
+                    <!--
+                        Звёздочка избранного — видна только если IsFavorite=true
+                        Visibility="{Binding IsFavorite, Converter={StaticResource BoolToVis}}"
+                        BoolToVis: true → Visible, false → Collapsed (не занимает место)
+                    -->
+                    <TextBlock Text="★" Foreground="#FFD700" FontSize="12"
+                               HorizontalAlignment="Right" Margin="0,2,2,0"
+                               Visibility="{Binding IsFavorite, Converter={StaticResource BoolToVis}}"/>
+                </Grid>
+            </Grid>
+        </DataTemplate>
+
+        <!-- Шаблон вида "Список" — маленькая миниатюра + имя + дата -->
+        <DataTemplate x:Key="ListItemTemplate">
+            <Grid Width="240">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="50"/>
+                    <!-- Миниатюра -->
+                    <ColumnDefinition Width="*"/>
+                    <!-- Текст -->
+                    <ColumnDefinition Width="20"/>
+                    <!-- Звёздочка -->
+                </Grid.ColumnDefinitions>
+
+                <!-- Маленькая миниатюра 50x40 -->
+                <Border Grid.Column="0" CornerRadius="4"
+                        Background="{DynamicResource PanelBrush}"
+                        ClipToBounds="True" Height="40" Width="50">
+                    <Image Source="{Binding Url, Converter={StaticResource UrlToImageConverter}}"
+                           Stretch="UniformToFill"/>
+                </Border>
+
+                <!-- Имя файла и дата загрузки -->
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+                    <TextBlock Text="{Binding OriginalFileName}"
+                               Foreground="White" FontSize="11"
+                               TextTrimming="CharacterEllipsis"/>
+                    <!--
+                        StringFormat="{}{0:dd.MM.yyyy}" — форматирование даты
+                        {} в начале — экранирование чтобы компилятор не путал с {Binding}
+                    -->
+                    <TextBlock Foreground="#A0A0B0" FontSize="10">
+                        <TextBlock.Text>
+                            <Binding Path="UploadedAt" StringFormat="{}{0:dd.MM.yyyy}"/>
+                        </TextBlock.Text>
+                    </TextBlock>
+                </StackPanel>
+
+                <!-- Звёздочка избранного -->
+                <TextBlock Grid.Column="2" Text="★" Foreground="#FFD700" FontSize="12"
+                           VerticalAlignment="Center"
+                           Visibility="{Binding IsFavorite, Converter={StaticResource BoolToVis}}"/>
+            </Grid>
+        </DataTemplate>
+
+    </Window.Resources>
+    <!-- КОНЕЦ РЕСУРСОВ -->
+
+    <!--
+        ═══════════════════════════════════════════════════════════
+        ОСНОВНАЯ СЕТКА ОКНА — 5 строк
+        ═══════════════════════════════════════════════════════════
+    -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="60"/>
+            <!-- Шапка -->
+            <RowDefinition Height="Auto"/>
+            <!-- Статистика -->
+            <RowDefinition Height="Auto"/>
+            <!-- Прогресс-бар -->
+            <RowDefinition Height="*"/>
+            <!-- Основной контент -->
+            <RowDefinition Height="35"/>
+            <!-- Статус-бар -->
+        </Grid.RowDefinitions>
+
+        <!-- ══════════════════════════════════════════════════════
+             СТРОКА 0: ШАПКА ПРИЛОЖЕНИЯ
+             ══════════════════════════════════════════════════════ -->
+        <Border Grid.Row="0" Background="{DynamicResource HeaderBrush}">
+            <!--
+                DockPanel с LastChildFill="True" — последний дочерний элемент
+                занимает всё оставшееся пространство
+                Порядок: Left (логотип), Right (кнопки), затем центр (сервер)
+            -->
+            <DockPanel Margin="20,0" LastChildFill="True">
+
+                <!-- Логотип: иконка камеры + надпись PhotoViewer -->
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal"
+                            VerticalAlignment="Center" Margin="0,0,20,0">
+                    <!-- Иконка камеры через Path (SVG-подобный синтаксис WPF) -->
+                    <Viewbox Width="30" Height="30" Margin="0,0,8,0">
+                        <Canvas Width="24" Height="24">
+                            <Path Fill="#E94560"
+                                  Data="M20,5H16.83L15,3H9L7.17,5H4C2.9,5 2,5.9 2,7V19C2,20.1 2.9,21 4,21H20C21.1,21 22,20.1 22,19V7C22,5.9 21.1,5 20,5ZM12,17C9.24,17 7,14.76 7,12C7,9.24 9.24,7 12,7C14.76,7 17,9.24 17,12C17,14.76 14.76,17 12,17ZM12,9C10.34,9 9,10.34 9,12C9,13.66 10.34,15 12,15C13.66,15 15,13.66 15,12C15,10.34 13.66,9 12,9Z"/>
+                        </Canvas>
+                    </Viewbox>
+                    <!-- LogoTextBrush меняется при переключении темы -->
+                    <TextBlock Text="PhotoViewer" FontSize="20" FontWeight="Bold"
+                               Foreground="{DynamicResource LogoTextBrush}"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Кнопки управления (прикреплены к правому краю) -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="＋  Загрузить" Margin="0,0,8,0"
+                            Style="{StaticResource ModernButton}"
+                            Click="UploadButton_Click"/>
+                    <Button Content="⬇  Скачать" Margin="0,0,8,0"
+                            Style="{StaticResource GreenButton}"
+                            Click="DownloadButton_Click"/>
+                    <Button Content="📦  ZIP" Margin="0,0,8,0"
+                            Style="{StaticResource GreenButton}"
+                            Click="ExportZipButton_Click"
+                            ToolTip="Экспорт выбранных фото в ZIP архив"/>
+                    <!-- x:Name нужен чтобы менять Content: "▶  Слайд-шоу" ↔ "⏹  Стоп" -->
+                    <Button x:Name="SlideshowButton" Content="▶  Слайд-шоу" Margin="0,0,8,0"
+                            Style="{StaticResource OrangeButton}"
+                            Click="SlideshowButton_Click"/>
+                    <!-- Кнопка переключения темы: 🌙 (тёмная) ↔ ☀️ (светлая) -->
+                    <Button x:Name="ThemeButton" Content="🌙" Margin="0,0,8,0"
+                            Style="{StaticResource SecondaryButton}"
+                            Padding="10,8" FontSize="14"
+                            Click="ThemeButton_Click"
+                            ToolTip="Переключить тему"/>
+                    <Button Content="🗑  Удалить" Margin="0,0,8,0"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="DeleteButton_Click"/>
+                    <Button Content="↻  Обновить"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="RefreshButton_Click"/>
+                </StackPanel>
+
+                <!-- Поле ввода адреса сервера (занимает оставшееся место в центре) -->
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                            HorizontalAlignment="Center">
+                    <!--
+                        Индикатор подключения: Ellipse (кружок)
+                        Fill меняется в коде: зелёный = онлайн, красный = офлайн
+                    -->
+                    <Ellipse x:Name="ConnectionIndicator"
+                             Width="10" Height="10"
+                             Fill="#555"
+                             Margin="0,0,8,0"
+                             VerticalAlignment="Center"/>
+                    <TextBlock Text="Сервер:" Foreground="{DynamicResource SubTextBrush}"
+                               VerticalAlignment="Center" Margin="0,0,8,0" FontSize="13"/>
+                    <TextBox x:Name="ServerUrlBox" Width="270"
+                             Style="{StaticResource ModernTextBox}"
+                             Text="http://localhost:5000"/>
+                    <Button Content="Подключиться" Margin="8,0,0,0"
+                            Style="{StaticResource ModernButton}"
+                            Click="ConnectButton_Click"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ══════════════════════════════════════════════════════
+             СТРОКА 1: СТРОКА СТАТИСТИКИ СЕРВЕРА
+             ══════════════════════════════════════════════════════ -->
+        <Border Grid.Row="1" Background="{DynamicResource StatsBrush}" Padding="20,6">
+            <StackPanel Orientation="Horizontal">
+                <!-- Количество фотографий: обновляется в LoadStatsAsync() -->
+                <TextBlock x:Name="StatsTotalText"
+                           Foreground="{DynamicResource SubTextBrush}"
+                           FontSize="12" Margin="0,0,24,0"
+                           Text="📊 Нет подключения"/>
+                <!-- Размер хранилища (форматируется: Б/КБ/МБ) -->
+                <TextBlock x:Name="StatsSizeText"
+                           Foreground="{DynamicResource SubTextBrush}"
+                           FontSize="12" Margin="0,0,24,0"/>
+                <!-- Дата последней загрузки -->
+                <TextBlock x:Name="StatsLastUploadText"
+                           Foreground="{DynamicResource SubTextBrush}" FontSize="12"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ══════════════════════════════════════════════════════
+             СТРОКА 2: ПРОГРЕСС-БАР ЗАГРУЗКИ
+             Скрыт по умолчанию (Visibility="Collapsed")
+             Показывается в UploadButton_Click и Window_Drop
+             ══════════════════════════════════════════════════════ -->
+        <Border Grid.Row="2" Background="{DynamicResource StatsBrush}" Padding="20,4"
+                x:Name="ProgressPanel" Visibility="Collapsed">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <!-- Полоса прогресса -->
+                    <ColumnDefinition Width="Auto"/>
+                    <!-- Текст "X из Y" -->
+                </Grid.ColumnDefinitions>
+                <!-- Value обновляется в коде: (i+1)*100/total -->
+                <ProgressBar x:Name="UploadProgressBar"
+                             Height="8"
+                             Background="#0F3460" Foreground="#E94560"
+                             BorderThickness="0"
+                             Minimum="0" Maximum="100"/>
+                <TextBlock x:Name="ProgressText" Grid.Column="1"
+                           Foreground="{DynamicResource SubTextBrush}"
+                           FontSize="11" Margin="12,0,0,0" VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+
+        <!-- ══════════════════════════════════════════════════════
+             СТРОКА 3: ОСНОВНОЙ КОНТЕНТ (боковая панель + просмотр)
+             ══════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="3" Margin="16,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="280"/>
+                <!-- Боковая панель с вкладками -->
+                <ColumnDefinition Width="*"/>
+                <!-- Область просмотра -->
+            </Grid.ColumnDefinitions>
+
+            <!-- ── КОЛОНКА 0: БОКОВАЯ ПАНЕЛЬ С ВКЛАДКАМИ ─────────── -->
+            <Border Grid.Column="0"
+                    Background="{DynamicResource HeaderBrush}"
+                    CornerRadius="10" Margin="0,0,12,0">
+                <TabControl>
+
+                    <!-- ── ВКЛАДКА "ГАЛЕРЕЯ" ─────────────────────── -->
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock Text="🖼 Галерея" FontSize="12"/>
+                        </TabItem.Header>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <!-- Заголовок + счётчик -->
+                                <RowDefinition Height="Auto"/>
+                                <!-- Поиск -->
+                                <RowDefinition Height="Auto"/>
+                                <!-- Сортировка + фильтр -->
+                                <RowDefinition Height="*"/>
+                                <!-- Список фото -->
+                            </Grid.RowDefinitions>
+
+                            <!-- Заголовок галереи + кнопка вида + счётчик -->
+                            <Border Grid.Row="0"
+                                    Background="{DynamicResource PanelBrush}"
+                                    Padding="14,10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <!-- GalleryHeaderText меняется при выборе альбома -->
+                                    <TextBlock x:Name="GalleryHeaderText" Text="Все фото"
+                                               Foreground="{DynamicResource TextBrush}"
+                                               FontWeight="SemiBold" FontSize="13"
+                                               VerticalAlignment="Center"/>
+                                    <!--
+                                        Кнопка переключения вида: ▦ (сетка) ↔ ☰ (список)
+                                        Click меняет ItemTemplate у PhotoListBox
+                                    -->
+                                    <Button x:Name="ViewToggleButton" Grid.Column="1"
+                                            Content="▦" Foreground="White"
+                                            Background="Transparent" BorderThickness="0"
+                                            FontSize="16" Cursor="Hand"
+                                            Margin="0,0,8,0"
+                                            Click="ViewToggleButton_Click"/>
+                                    <!-- Красный бейдж с количеством фото -->
+                                    <Border Grid.Column="2" Background="#E94560"
+                                            CornerRadius="10" Padding="8,2">
+                                        <TextBlock x:Name="PhotoCountText"
+                                                   Foreground="White"
+                                                   FontSize="11" FontWeight="SemiBold"
+                                                   Text="0"/>
+                                    </Border>
+                                </Grid>
+                            </Border>
+
+                            <!--
+                                Поле поиска + подсказка
+                                Подсказка "🔍 Поиск по названию..." реализована через
+                                отдельный TextBlock поверх TextBox (IsHitTestVisible="False")
+                                Скрывается когда SearchBox не пустой
+                            -->
+                            <Border Grid.Row="1" Padding="8,6">
+                                <TextBox x:Name="SearchBox"
+                                         Style="{StaticResource ModernTextBox}"
+                                         TextChanged="SearchBox_TextChanged"/>
+                            </Border>
+                            <Border Grid.Row="1" Padding="16,12" IsHitTestVisible="False">
+                                <TextBlock x:Name="SearchHint"
+                                           Text="🔍 Поиск по названию..."
+                                           Foreground="#555" FontSize="12"
+                                           VerticalAlignment="Center"/>
+                            </Border>
+
+                            <!-- Сортировка + кнопка фильтра избранных -->
+                            <Grid Grid.Row="2" Margin="8,0,8,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <!-- ComboBox -->
+                                    <ColumnDefinition Width="8"/>
+                                    <!-- Отступ -->
+                                    <ColumnDefinition Width="Auto"/>
+                                    <!-- Кнопка ★ -->
+                                </Grid.ColumnDefinitions>
+                                <!--
+                                    SelectedIndex соответствует порядку ComboBoxItem (0,1,2,3)
+                                    В ApplySearchAndSort() switch по SelectedIndex определяет сортировку
+                                -->
+                                <ComboBox x:Name="SortComboBox" Grid.Column="0"
+                                          Style="{StaticResource ModernComboBox}"
+                                          SelectionChanged="SortComboBox_SelectionChanged">
+                                    <ComboBoxItem Content="По дате (новые)" IsSelected="True"/>
+                                    <!-- 0 -->
+                                    <ComboBoxItem Content="По дате (старые)"/>
+                                    <!-- 1 -->
+                                    <ComboBoxItem Content="По имени (А-Я)"/>
+                                    <!-- 2 -->
+                                    <ComboBoxItem Content="По имени (Я-А)"/>
+                                    <!-- 3 -->
+                                </ComboBox>
+                                <!--
+                                    Кнопка фильтра "только избранные"
+                                    Foreground меняется в коде: золотой (активен) / серый (неактивен)
+                                -->
+                                <Button Grid.Column="2" x:Name="FavoriteFilterButton"
+                                        Content="★" FontSize="16" Foreground="#555"
+                                        Background="Transparent" BorderThickness="0"
+                                        Cursor="Hand" Padding="6,4"
+                                        Click="FavoriteFilterButton_Click"
+                                        ToolTip="Показать только избранные"/>
+                            </Grid>
+
+                            <!--
+                                Галерея фотографий
+                                SelectionMode="Extended" — множественный выбор через Ctrl+Click
+                                ItemTemplate переключается между GridItemTemplate/ListItemTemplate
+                                HorizontalScrollBarVisibility="Disabled" — только вертикальный скролл
+                            -->
+                            <ListBox x:Name="PhotoListBox" Grid.Row="3"
+                                     Background="Transparent" BorderThickness="0"
+                                     Padding="4"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     SelectionChanged="PhotoListBox_SelectionChanged"
+                                     SelectionMode="Extended"
+                                     ItemTemplate="{StaticResource GridItemTemplate}"/>
+                        </Grid>
+                    </TabItem>
+
+                    <!-- ── ВКЛАДКА "АЛЬБОМЫ" ──────────────────────── -->
+                    <TabItem>
+                        <TabItem.Header>
+                            <TextBlock Text="📁 Альбомы" FontSize="12"/>
+                        </TabItem.Header>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <!-- Заголовок + кнопка ＋ -->
+                                <RowDefinition Height="Auto"/>
+                                <!-- Кнопка "Все фото" -->
+                                <RowDefinition Height="*"/>
+                                <!-- Список альбомов -->
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0"
+                                    Background="{DynamicResource PanelBrush}"
+                                    Padding="14,10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Мои альбомы"
+                                               Foreground="{DynamicResource TextBrush}"
+                                               FontWeight="SemiBold" FontSize="13"
+                                               VerticalAlignment="Center"/>
+                                    <!-- Кнопка создания нового альбома -->
+                                    <Button Grid.Column="1" Content="＋"
+                                            Style="{StaticResource ModernButton}"
+                                            Padding="8,4" FontSize="14"
+                                            Click="CreateAlbumButton_Click"
+                                            ToolTip="Создать новый альбом"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- Кнопка возврата к "Все фото" -->
+                            <Button Grid.Row="1"
+                                    Content="📷 Показать все фото"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Margin="8,6,8,0" FontSize="11"
+                                    Click="ShowAllPhotosButton_Click"/>
+
+                            <!--
+                                Список альбомов
+                                ItemTemplate — DataTemplate с кнопками ＋ (добавить фото) и 🗑 (удалить)
+                                Tag="{Binding Id}" — ID альбома передаётся через Tag кнопки в обработчик
+                            -->
+                            <ListBox x:Name="AlbumsListBox" Grid.Row="2"
+                                     Background="Transparent" BorderThickness="0"
+                                     Padding="4"
+                                     SelectionChanged="AlbumsListBox_SelectionChanged">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Width="240">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <!-- Название и количество фото -->
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Name}"
+                                                           Foreground="{DynamicResource TextBrush}"
+                                                           FontSize="13"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Foreground="{DynamicResource SubTextBrush}"
+                                                           FontSize="10">
+                                                    <TextBlock.Text>
+                                                        <Binding Path="PhotoCount"
+                                                                 StringFormat="{}{0} фото"/>
+                                                    </TextBlock.Text>
+                                                </TextBlock>
+                                            </StackPanel>
+                                            <!-- Кнопка "добавить текущее фото в альбом" -->
+                                            <Button Grid.Column="1" Content="＋" FontSize="12"
+                                                    Background="Transparent" BorderThickness="0"
+                                                    Foreground="#E94560" Cursor="Hand"
+                                                    Padding="6,4" Margin="4,0"
+                                                    Click="AddToAlbumButton_Click"
+                                                    Tag="{Binding Id}"
+                                                    ToolTip="Добавить выбранное фото в альбом"/>
+                                            <!-- Кнопка удаления альбома -->
+                                            <Button Grid.Column="2" Content="🗑" FontSize="12"
+                                                    Background="Transparent" BorderThickness="0"
+                                                    Foreground="#E94560" Cursor="Hand"
+                                                    Padding="6,4"
+                                                    Click="DeleteAlbumButton_Click"
+                                                    Tag="{Binding Id}"
+                                                    ToolTip="Удалить альбом"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </TabItem>
+                </TabControl>
+            </Border>
+
+            <!-- ── КОЛОНКА 1: ОБЛАСТЬ ПРОСМОТРА ──────────────────── -->
+            <Border Grid.Column="1"
+                    Background="{DynamicResource HeaderBrush}"
+                    CornerRadius="10">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <!-- Изображение -->
+                        <RowDefinition Height="Auto"/>
+                        <!-- Информационная панель -->
+                    </Grid.RowDefinitions>
+
+                    <!--
+                        Контейнер изображения
+                        ClipToBounds="True" — обрезает зумированное изображение по границе
+                        MouseWheel — обработчик зума колёсиком
+                    -->
+                    <Border Grid.Row="0" Margin="16,16,16,8"
+                            CornerRadius="8"
+                            Background="{DynamicResource PanelBrush}"
+                            ClipToBounds="True"
+                            MouseWheel="PreviewBorder_MouseWheel">
+                        <!--
+                            RenderTransformOrigin="0.5,0.5" — масштабирование/поворот
+                            относительно центра изображения (50%, 50%)
+                            
+                            TransformGroup позволяет применить несколько трансформаций:
+                            1. ScaleTransform — зум (масштабирование)
+                            2. RotateTransform — поворот
+                        -->
+                        <Image x:Name="PreviewImage"
+                               Stretch="Uniform" Margin="8"
+                               Cursor="Hand"
+                               MouseLeftButtonDown="PreviewImage_MouseLeftButtonDown"
+                               RenderTransformOrigin="0.5,0.5">
+                            <Image.RenderTransform>
+                                <TransformGroup>
+                                    <!--
+                                        ScaleTransform — зум
+                                        ScaleX/ScaleY меняются в PreviewBorder_MouseWheel
+                                        1.0 = 100%, 2.0 = 200% и т.д
+                                    -->
+                                    <ScaleTransform x:Name="ImageScaleTransform"
+                                                    ScaleX="1" ScaleY="1"/>
+                                    <!--
+                                        RotateTransform — поворот
+                                        Angle меняется в RotateLeftButton_Click/RotateRightButton_Click
+                                        Значения: 0, 90, 180, 270
+                                    -->
+                                    <RotateTransform x:Name="ImageRotateTransform"
+                                                     Angle="0"/>
+                                </TransformGroup>
+                            </Image.RenderTransform>
+                        </Image>
+                    </Border>
+
+                    <!-- Кнопки навигации ❮ ❯ (поверх изображения) -->
+                    <Button Grid.Row="0" Content="❮"
+                            Style="{StaticResource NavButton}"
+                            HorizontalAlignment="Left" VerticalAlignment="Center"
+                            Margin="24,0,0,0"
+                            Click="PrevButton_Click"/>
+                    <Button Grid.Row="0" Content="❯"
+                            Style="{StaticResource NavButton}"
+                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                            Margin="0,0,24,0"
+                            Click="NextButton_Click"/>
+
+                    <!-- ── ИНФОРМАЦИОННАЯ ПАНЕЛЬ ─────────────────── -->
+                    <Border Grid.Row="1"
+                            Background="{DynamicResource PanelBrush}"
+                            CornerRadius="0,0,10,10" Padding="16,10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <!-- Текстовая информация -->
+                                <ColumnDefinition Width="Auto"/>
+                                <!-- Кнопки действий -->
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Информация о текущем фото -->
+                            <StackPanel Grid.Column="0">
+                                <!-- Отображаемое имя файла (OriginalFileName) -->
+                                <TextBlock x:Name="PhotoNameText"
+                                           Foreground="{DynamicResource TextBrush}"
+                                           FontSize="13" FontWeight="SemiBold"
+                                           Margin="0,0,0,2"
+                                           TextTrimming="CharacterEllipsis"/>
+                                <!-- Описание фотографии -->
+                                <TextBlock x:Name="DescriptionText"
+                                           Foreground="{DynamicResource TextBrush}"
+                                           FontSize="12" TextWrapping="Wrap"
+                                           Margin="0,0,0,4"/>
+                                <!-- Дата загрузки -->
+                                <TextBlock x:Name="DateText"
+                                           Foreground="{DynamicResource SubTextBrush}"
+                                           FontSize="11"/>
+                                <!-- Разрешение и размер файла -->
+                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                    <TextBlock x:Name="ResolutionText"
+                                               Foreground="{DynamicResource SubTextBrush}"
+                                               FontSize="11" Margin="0,0,16,0"/>
+                                    <TextBlock x:Name="FileSizeText"
+                                               Foreground="{DynamicResource SubTextBrush}"
+                                               FontSize="11"/>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- Кнопки действий с фото -->
+                            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                        VerticalAlignment="Center">
+                                <!-- ★ Избранное: Content меняется "★"↔"☆" в ShowPhotoAsync -->
+                                <Button x:Name="FavoriteButton" Content="☆"
+                                        Style="{StaticResource YellowButton}"
+                                        FontSize="14" Padding="8,6" Margin="0,0,6,0"
+                                        Click="FavoriteButton_Click"/>
+                                <!-- ↺ Поворот влево (-90°) -->
+                                <Button Content="↺"
+                                        Style="{StaticResource SecondaryButton}"
+                                        FontSize="14" Padding="8,6" Margin="0,0,6,0"
+                                        Click="RotateLeftButton_Click"
+                                        ToolTip="Повернуть влево на 90°"/>
+                                <!-- ↻ Поворот вправо (+90°) -->
+                                <Button Content="↻"
+                                        Style="{StaticResource SecondaryButton}"
+                                        FontSize="14" Padding="8,6" Margin="0,0,6,0"
+                                        Click="RotateRightButton_Click"
+                                        ToolTip="Повернуть вправо на 90°"/>
+                                <!-- 📋 Копировать в буфер обмена -->
+                                <Button Content="📋"
+                                        Style="{StaticResource SecondaryButton}"
+                                        FontSize="14" Padding="8,6" Margin="0,0,6,0"
+                                        Click="CopyButton_Click"
+                                        ToolTip="Копировать изображение в буфер обмена"/>
+                                <!-- ✏ Редактировать описание -->
+                                <Button Content="✏"
+                                        Style="{StaticResource SecondaryButton}"
+                                        FontSize="14" Padding="8,6" Margin="0,0,6,0"
+                                        Click="EditDescriptionButton_Click"
+                                        ToolTip="Изменить описание фотографии"/>
+                                <!-- 🔤 Переименовать -->
+                                <Button Content="🔤"
+                                        Style="{StaticResource SecondaryButton}"
+                                        FontSize="14" Padding="8,6"
+                                        Click="RenameButton_Click"
+                                        ToolTip="Переименовать фотографию"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ══════════════════════════════════════════════════════
+             СТРОКА 4: СТАТУС-БАР
+             Показывает текущее состояние и количество выделенных фото
+             ══════════════════════════════════════════════════════ -->
+        <Border Grid.Row="4" Background="{DynamicResource HeaderBrush}" Padding="20,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <!-- Статус -->
+                    <ColumnDefinition Width="Auto"/>
+                    <!-- Счётчик выделения -->
+                </Grid.ColumnDefinitions>
+                <!-- Текущий статус: имя файла / ошибка / прогресс -->
+                <TextBlock x:Name="StatusText"
+                           Foreground="{DynamicResource SubTextBrush}"
+                           VerticalAlignment="Center" FontSize="12"/>
+                <!-- Показывается при множественном выделении: "Выбрано: 3" -->
+                <TextBlock x:Name="SelectionText" Grid.Column="1"
+                           Foreground="#E94560"
+                           VerticalAlignment="Center" FontSize="12"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
