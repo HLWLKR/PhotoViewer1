@@ -1,0 +1,9 @@
+# robots.txt для PhotoViewer
+# Разрешаем все поисковые роботы индексировать сайт
+
+User-agent: *
+Allow: /
+
+# Указываем путь к карте сайта
+# ЗАМЕНИТЕ ВАШ_ЛОГИН на ваш логин GitHub
+Sitemap: https://HLWLKR.github.io/PhotoViewer1/sitemap.xml
