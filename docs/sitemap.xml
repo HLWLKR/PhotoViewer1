@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    sitemap.xml — карта сайта для поисковых роботов.
+    Помогает Google и Яндексу быстрее найти и проиндексировать страницы.
+    ЗАМЕНИТЕ ВАШ_ЛОГИН на ваш реальный логин GitHub.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+
+    <!-- Главная страница -->
+    <url>
+        <loc>https://HLWLKR.github.io/PhotoViewer1/</loc>
+        <!-- Дата последнего изменения — обновляйте при каждом изменении сайта -->
+        <lastmod>2026-06-22</lastmod>
+        <!-- Как часто поисковик должен проверять страницу на обновления -->
+        <changefreq>monthly</changefreq>
+        <!-- Приоритет от 0.0 до 1.0. Главная страница = максимальный -->
+        <priority>1.0</priority>
+    </url>
+
+</urlset>
