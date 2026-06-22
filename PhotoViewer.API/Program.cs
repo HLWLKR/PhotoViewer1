@@ -50,13 +50,11 @@ var app = builder.Build();
 // ── HTTP конвейер (Middleware Pipeline) ────────────────────────────────────
 // Middleware обрабатывают запрос последовательно в порядке регистрации
 
-// Swagger доступен только в режиме разработки (Development environment)
+// Swagger доступен всегда — сервер работает только в локальной сети,
+// поэтому нет смысла прятать документацию API только за Development
 // Открыть: http://localhost:5000/swagger
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();       // Генерирует JSON-схему API
-    app.UseSwaggerUI();     // Отображает красивый веб-интерфейс
-}
+app.UseSwagger();       // Генерирует JSON-схему API
+app.UseSwaggerUI();     // Отображает красивый веб-интерфейс
 
 // Middleware для отдачи статических файлов из папки wwwroot/
 // Именно через него клиенты скачивают фотографии по URL вида:
