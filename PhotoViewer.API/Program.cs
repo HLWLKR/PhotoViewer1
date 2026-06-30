@@ -77,9 +77,10 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-    // EnsureCreated() — создаёт базу данных и все таблицы,
-    // если они ещё не существуют
-    db.Database.EnsureCreated();
+    // Migrate() — автоматически создаёт базу данных (если её ещё нет)
+    // и последовательно применяет все недостающие миграции Entity Framework Core.
+    // Обеспечивает точное соответствие структуры таблиц PostgreSQL коду приложения.
+    db.Database.Migrate();
 }
 
 // Запуск HTTP-сервера. Приложение начинает принимать запросы
